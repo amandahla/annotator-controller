@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -10,6 +11,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 )
+
+const annotationKey = "annotator-controller/processed"
 
 // reconcilePod reconciles Pods
 type reconcilePod struct {
@@ -20,6 +23,7 @@ func (r *reconcilePod) Reconcile(ctx context.Context, request reconcile.Request)
 	log := log.FromContext(ctx)
 
 	rs := &corev1.Pod{}
+
 	err := r.client.Get(ctx, request.NamespacedName, rs)
 	if apierrors.IsNotFound(err) {
 		log.Error(nil, "Could not find Pod")
@@ -27,8 +31,25 @@ func (r *reconcilePod) Reconcile(ctx context.Context, request reconcile.Request)
 	}
 
 	if err != nil {
-		return reconcile.Result{}, fmt.Errorf("could not fetch Pod: %+w", err)
+		return reconcile.Result{Requeue: true}, fmt.Errorf("could not fetch Pod: %+w", err)
 	}
-	log.Info("Reconciling Pod", "name", rs.Name, "namespace", rs.Namespace)
+
+	if rs.Annotations == nil {
+		rs.Annotations = map[string]string{}
+	}
+	if v, ok := rs.Annotations[annotationKey]; ok {
+		if strings.EqualFold(v, "true") {
+			log.Info("Skipping pod, already annotated", "name", rs.Name, "namespace", rs.Namespace)
+			return reconcile.Result{}, nil
+		}
+	}
+
+	rs.Annotations[annotationKey] = "true"
+	err = r.client.Update(ctx, rs)
+	log.Info("Annotating", "name", rs.Name, "namespace", rs.Namespace)
+	if err != nil {
+		return reconcile.Result{Requeue: true}, fmt.Errorf("could not write Pod: %+w", err)
+	}
+
 	return reconcile.Result{}, nil
 }
