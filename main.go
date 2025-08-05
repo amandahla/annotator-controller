@@ -18,8 +18,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/source"
 )
 
-const podPrefix = "synapse-"
-
 func init() {
 	log.SetLogger(zap.New())
 }
@@ -57,19 +55,31 @@ func main() {
 func typedPodPredicates() predicate.TypedFuncs[*corev1.Pod] {
 	return predicate.TypedFuncs[*corev1.Pod]{
 		CreateFunc: func(e event.TypedCreateEvent[*corev1.Pod]) bool {
-			if strings.HasPrefix(e.Object.GetName(), podPrefix) {
-				return true
-			}
-			return false
+			return true
 		},
 		UpdateFunc: func(e event.TypedUpdateEvent[*corev1.Pod]) bool {
+			old := e.ObjectOld
+			new := e.ObjectNew
+
+			oldVal := ""
+			if old.Annotations != nil {
+				oldVal = old.Annotations[AnnotationKey]
+			}
+
+			newVal := ""
+			if new.Annotations != nil {
+				newVal = new.Annotations[AnnotationKey]
+			}
+
+			// Only reconcile if the value changed, or if it's still missing
+			if strings.EqualFold(oldVal, newVal) && strings.EqualFold(newVal, "true") {
+				return false
+			}
+
 			return true
 		},
 		DeleteFunc: func(e event.TypedDeleteEvent[*corev1.Pod]) bool {
-			if strings.HasPrefix(e.Object.GetName(), podPrefix) {
-				log.Log.Info("Skipping Reconcile on deleted synapse-* pod", "name", e.Object.GetName(), "namespace", e.Object.GetNamespace())
-			}
-			return false
+			return true
 		},
 		GenericFunc: func(e event.TypedGenericEvent[*corev1.Pod]) bool {
 			return false
