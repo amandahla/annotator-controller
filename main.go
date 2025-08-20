@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	corev1 "k8s.io/api/core/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/config"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/event"
@@ -40,6 +41,7 @@ func main() {
 	}
 	fmt.Println("watching pods")
 	err = c.Watch(source.Kind(mgr.GetCache(), &corev1.Pod{}, &handler.TypedEnqueueRequestForObject[*corev1.Pod]{}, typedPodPredicates()))
+	// err = c.Watch(source.Kind(mgr.GetCache(), &corev1.Pod{}, &handler.TypedEnqueueRequestForObject[*corev1.Pod]{}))
 	if err != nil {
 		fmt.Println(err)
 		os.Exit(1)
@@ -52,6 +54,24 @@ func main() {
 	}
 }
 
+func GetConfigAnnotation() (string, error) {
+	cfg := config.GetConfigOrDie()
+	cl, err := client.New(cfg, client.Options{})
+	cm := &corev1.ConfigMap{}
+	err = cl.Get(context.Background(), client.ObjectKey{
+		Name:      "annotation-config",
+		Namespace: "default",
+	}, cm)
+	if err != nil {
+		return "", err
+	}
+	annotationKey := cm.Data["annotation_key"]
+	if annotationKey == "" {
+		return "", nil
+	}
+	return annotationKey, nil
+}
+
 func typedPodPredicates() predicate.TypedFuncs[*corev1.Pod] {
 	return predicate.TypedFuncs[*corev1.Pod]{
 		CreateFunc: func(e event.TypedCreateEvent[*corev1.Pod]) bool {
@@ -60,15 +80,18 @@ func typedPodPredicates() predicate.TypedFuncs[*corev1.Pod] {
 		UpdateFunc: func(e event.TypedUpdateEvent[*corev1.Pod]) bool {
 			old := e.ObjectOld
 			new := e.ObjectNew
-
+			annotationKey, err := GetConfigAnnotation()
+			if err != nil {
+				return true
+			}
 			oldVal := ""
 			if old.Annotations != nil {
-				oldVal = old.Annotations[AnnotationKey]
+				oldVal = old.Annotations[annotationKey]
 			}
 
 			newVal := ""
 			if new.Annotations != nil {
-				newVal = new.Annotations[AnnotationKey]
+				newVal = new.Annotations[annotationKey]
 			}
 
 			// Only reconcile if the value changed, or if it's still missing
